@@ -1,13 +1,20 @@
 import { useRef, useState } from 'react'
-import { AlertTriangle, Download, Monitor, Moon, RotateCcw, Sun, Upload } from 'lucide-react'
+import { AlertTriangle, Download, KeyRound, LogOut, Monitor, Moon, RotateCcw, Sun, Trash2, Upload } from 'lucide-react'
 import { Button, Card, SectionTitle, Segmented, Slider } from '../components/ui'
 import { useStore } from '../lib/store'
 import { useFmt } from '../lib/useFmt'
+import { useAuth } from '../lib/auth'
+import { useTheme } from '../lib/theme'
+import { api } from '../lib/api'
+import { Link } from '../lib/router'
+import { normalize } from '../lib/store'
 import { ASSET_CLASSES, CATEGORIES, CURRENCIES } from '../lib/constants'
 import { currencySymbol } from '../lib/format'
 
 export default function Settings() {
-  const { state, dispatch } = useStore()
+  const { state, dispatch, mode } = useStore()
+  const { user, logout, dropSession } = useAuth()
+  const { theme, setTheme } = useTheme()
   const f = useFmt()
   const { settings } = state
   const fileRef = useRef(null)
@@ -50,7 +57,7 @@ export default function Settings() {
       try {
         const s = JSON.parse(txt)
         if (!Array.isArray(s.holdings) || !Array.isArray(s.transactions) || !s.settings) throw new Error()
-        dispatch({ type: 'replace', state: { ...state, ...s, settings: { ...state.settings, ...s.settings } } })
+        dispatch({ type: 'replace', state: normalize(s, state) })
         setMsg({ ok: true, text: 'Data imported successfully.' })
       } catch {
         setMsg({ ok: false, text: 'That file is not a valid Aura Wealth export.' })
@@ -67,14 +74,21 @@ export default function Settings() {
         <p className="t-label-2 text-[15px]">Preferences are saved automatically on this device</p>
       </div>
 
+      {mode === 'user' ? <AccountCard user={user} logout={logout} dropSession={dropSession} /> : (
+        <Card className="p-5 sm:p-6">
+          <SectionTitle title="Demo mode" subtitle="You’re exploring with sample data stored only in this browser" />
+          <Link to="/signup" className="inline-flex items-center justify-center min-h-[44px] px-5 rounded-[14px] bg-apple-blue text-white text-[15px] font-semibold">Create a free account</Link>
+        </Card>
+      )}
+
       <Card className="p-5 sm:p-6">
         <SectionTitle title="Appearance & Currency" />
         <div className="space-y-5">
           <div>
             <p className="text-[13px] font-medium t-label-2 mb-2 px-1">Theme</p>
             <Segmented
-              value={settings.theme}
-              onChange={(v) => patch({ theme: v })}
+              value={theme}
+              onChange={setTheme}
               options={[
                 { value: 'light', label: <span className="inline-flex items-center gap-1.5"><Sun size={16} />Light</span> },
                 { value: 'dark', label: <span className="inline-flex items-center gap-1.5"><Moon size={16} />Dark</span> },
@@ -129,23 +143,78 @@ export default function Settings() {
       </Card>
 
       <Card className="p-5 sm:p-6">
-        <SectionTitle title="Your Data" subtitle="Everything lives in this browser’s local storage" />
+        <SectionTitle title="Your Data" subtitle={mode === 'demo' ? 'Demo data lives only in this browser' : 'Stored privately under your account'} />
         <div className="flex flex-wrap gap-3">
           <Button variant="secondary" icon={Download} onClick={exportData}>Export JSON</Button>
           <Button variant="secondary" icon={Upload} onClick={() => fileRef.current?.click()}>Import JSON</Button>
           <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={importData} />
           {confirmReset ? (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[14px] text-apple-red flex items-center gap-1.5"><AlertTriangle size={16} />Erase everything?</span>
-              <Button variant="danger" onClick={() => { dispatch({ type: 'reset' }); setConfirmReset(false); setMsg({ ok: true, text: 'Demo data restored.' }) }}>Yes, reset</Button>
+              <span className="text-[14px] text-apple-red flex items-center gap-1.5"><AlertTriangle size={16} />Erase all holdings and transactions?</span>
+              <Button variant="danger" onClick={() => { dispatch({ type: 'clear' }); setConfirmReset(false); setMsg({ ok: true, text: 'All holdings and transactions cleared.' }) }}>Yes, erase</Button>
               <Button variant="ghost" onClick={() => setConfirmReset(false)}>Cancel</Button>
             </div>
           ) : (
-            <Button variant="danger" icon={RotateCcw} onClick={() => setConfirmReset(true)}>Reset to demo data</Button>
+            <>
+              <Button variant="secondary" icon={RotateCcw} onClick={() => { dispatch({ type: 'sample' }); setMsg({ ok: true, text: 'Sample data loaded.' }) }}>Load sample data</Button>
+              <Button variant="danger" icon={Trash2} onClick={() => setConfirmReset(true)}>Clear all data</Button>
+            </>
           )}
         </div>
         {msg && <p role="status" className={`text-[14px] mt-3 px-1 ${msg.ok ? 'text-apple-green' : 'text-apple-red'}`}>{msg.text}</p>}
       </Card>
     </div>
+  )
+}
+
+function AccountCard({ user, logout, dropSession }) {
+  const [pw, setPw] = useState({ cur: '', next: '' })
+  const [msg, setMsg] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [del, setDel] = useState({ open: false, password: '' })
+
+  const run = async (fn, ok) => {
+    setBusy(true)
+    setMsg(null)
+    try { await fn(); if (ok) setMsg({ ok: true, text: ok }) } catch (e) { setMsg({ ok: false, text: e.message }) } finally { setBusy(false) }
+  }
+
+  return (
+    <Card className="p-5 sm:p-6">
+      <SectionTitle title="Account" subtitle={`${user?.name} · ${user?.email}`} action={<Button variant="secondary" icon={LogOut} onClick={logout}>Sign out</Button>} />
+      <form
+        className="grid sm:grid-cols-[1fr_1fr_auto] gap-3 items-end"
+        onSubmit={(e) => {
+          e.preventDefault()
+          run(async () => { await api('account', { method: 'POST', body: { password: pw.cur, newPassword: pw.next } }); setPw({ cur: '', next: '' }) }, 'Password updated. Other devices were signed out.')
+        }}
+      >
+        <label className="block"><span className="block text-[13px] font-medium t-label-2 mb-1.5 px-1">Current password</span>
+          <input className="field" type="password" autoComplete="current-password" value={pw.cur} onChange={(e) => setPw({ ...pw, cur: e.target.value })} required /></label>
+        <label className="block"><span className="block text-[13px] font-medium t-label-2 mb-1.5 px-1">New password</span>
+          <input className="field" type="password" autoComplete="new-password" minLength={8} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} required /></label>
+        <Button type="submit" variant="secondary" icon={KeyRound} disabled={busy}>Change</Button>
+      </form>
+
+      <div className="border-t hairline mt-5 pt-4">
+        {del.open ? (
+          <form
+            className="flex flex-col sm:flex-row gap-3 sm:items-end"
+            onSubmit={(e) => {
+              e.preventDefault()
+              run(async () => { await api('account', { method: 'DELETE', body: { password: del.password } }); dropSession() })
+            }}
+          >
+            <label className="block flex-1"><span className="block text-[13px] font-medium text-apple-red mb-1.5 px-1">Enter your password to permanently delete your account and all data</span>
+              <input className="field" type="password" autoComplete="current-password" value={del.password} onChange={(e) => setDel({ ...del, password: e.target.value })} required /></label>
+            <Button type="submit" variant="danger" icon={Trash2} disabled={busy}>Delete forever</Button>
+            <Button type="button" variant="ghost" onClick={() => setDel({ open: false, password: '' })}>Cancel</Button>
+          </form>
+        ) : (
+          <Button variant="danger" icon={Trash2} onClick={() => setDel({ open: true, password: '' })}>Delete account…</Button>
+        )}
+      </div>
+      {msg && <p role="status" className={`text-[14px] mt-3 px-1 ${msg.ok ? 'text-apple-green' : 'text-apple-red'}`}>{msg.text}</p>}
+    </Card>
   )
 }

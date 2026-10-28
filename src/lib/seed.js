@@ -89,7 +89,6 @@ export function seedState() {
   return {
     settings: {
       currency: 'USD',
-      theme: 'system',
       target: { ...DEFAULT_TARGET },
       budgets: { ...DEFAULT_BUDGETS },
       projection: { currentAge: 35, retireAge: 60, monthlySavings: 3800, annualReturn: 7, inflation: 2.8, shockPct: 0, shockYear: 10, useHoldings: true, startingBalance: 0 },
@@ -97,4 +96,10 @@ export function seedState() {
     holdings: seedHoldings(),
     transactions: seedTransactions(),
   }
+}
+
+/** A brand-new account: defaults only, no holdings or transactions. */
+export function blankState() {
+  const s = seedState()
+  return { ...s, holdings: [], transactions: [] }
 }
