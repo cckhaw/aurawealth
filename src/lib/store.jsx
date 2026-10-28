@@ -1,30 +1,33 @@
-import { createContext, useContext, useEffect, useMemo, useReducer, useState } from 'react'
-import { seedState } from './seed'
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { blankState, seedState } from './seed'
+import { api, ApiError } from './api'
 import { uid } from './format'
 
-const KEY = 'aura-wealth:v1'
+const DEMO_KEY = 'aura-wealth:v1'
 
-function load() {
-  const fresh = seedState()
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return fresh
-    const s = JSON.parse(raw)
-    if (!Array.isArray(s.holdings) || !Array.isArray(s.transactions)) return fresh
-    return {
-      holdings: s.holdings,
-      transactions: s.transactions,
-      settings: {
-        ...fresh.settings,
-        ...s.settings,
-        target: { ...fresh.settings.target, ...s.settings?.target },
-        budgets: { ...fresh.settings.budgets, ...s.settings?.budgets },
-        projection: { ...fresh.settings.projection, ...s.settings?.projection },
-      },
-    }
-  } catch {
-    return fresh
+/** Merge saved data over defaults so older/partial saves never crash the UI. */
+export function normalize(s, base = blankState()) {
+  if (!s || !Array.isArray(s.holdings) || !Array.isArray(s.transactions)) return base
+  const { theme, ...settings } = s.settings || {} // theme is a per-device preference now
+  return {
+    holdings: s.holdings,
+    transactions: s.transactions,
+    settings: {
+      ...base.settings,
+      ...settings,
+      target: { ...base.settings.target, ...settings.target },
+      budgets: { ...base.settings.budgets, ...settings.budgets },
+      projection: { ...base.settings.projection, ...settings.projection },
+    },
   }
+}
+
+export function loadDemo() {
+  try {
+    const raw = localStorage.getItem(DEMO_KEY)
+    if (raw) return normalize(JSON.parse(raw), seedState())
+  } catch { /* corrupt or blocked storage */ }
+  return seedState()
 }
 
 function reducer(state, a) {
@@ -53,8 +56,10 @@ function reducer(state, a) {
       return { ...state, settings: { ...state.settings, projection: { ...state.settings.projection, ...a.patch } } }
     case 'replace':
       return a.state
-    case 'reset':
-      return seedState()
+    case 'sample':
+      return { ...seedState(), settings: state.settings }
+    case 'clear':
+      return { ...state, holdings: [], transactions: [] }
     default:
       return state
   }
@@ -62,32 +67,80 @@ function reducer(state, a) {
 
 const Ctx = createContext(null)
 
-export function StoreProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, undefined, load)
+/**
+ * mode "demo": state lives in this browser's localStorage (nothing leaves the device).
+ * mode "user": state lives on the server under the signed-in account; nothing is cached locally,
+ * so another person on the same browser can never see it.
+ */
+export function StoreProvider({ mode, initial, rev: initialRev, onSignedOut, children }) {
+  const [state, dispatch] = useReducer(reducer, initial)
+  const [sync, setSync] = useState('saved') // saved | saving | error
+  const [notice, setNotice] = useState(null)
+  const rev = useRef(initialRev ?? null)
+  const first = useRef(true)
+  const latest = useRef(state)
+  latest.current = state
+  const saving = useRef(false)
+  const dirty = useRef(false)
 
   useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state))
-    } catch {
-      /* storage full or blocked – app keeps working in memory */
+    if (first.current) { first.current = false; return }
+    if (mode === 'demo') {
+      try { localStorage.setItem(DEMO_KEY, JSON.stringify(state)) } catch { /* storage full */ }
+      return
     }
+    dirty.current = true
+    setSync('saving')
+    const t = setTimeout(flush, 700)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state])
 
-  // Theme: class on <html>, follows the OS when set to "system".
-  const theme = state.settings.theme
-  const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
-  useEffect(() => {
-    const mq = matchMedia('(prefers-color-scheme: dark)')
-    const on = () => setSystemDark(mq.matches)
-    mq.addEventListener('change', on)
-    return () => mq.removeEventListener('change', on)
-  }, [])
-  const dark = theme === 'dark' || (theme === 'system' && systemDark)
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark)
-  }, [dark])
+  async function flush() {
+    if (saving.current) return // the running save re-checks `dirty` when it finishes
+    saving.current = true
+    try {
+      while (dirty.current) {
+        dirty.current = false
+        const snapshot = latest.current
+        try {
+          const r = await api('data', { method: 'PUT', body: { data: snapshot, rev: rev.current } })
+          rev.current = r.rev
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 401) return onSignedOut?.()
+          if (e instanceof ApiError && e.status === 409) {
+            rev.current = e.payload?.rev ?? null
+            dirty.current = false
+            first.current = true // don't echo the reload back to the server
+            dispatch({ type: 'replace', state: normalize(e.payload?.data) })
+            setNotice('Your data was updated on another device, so we loaded the latest version.')
+            setSync('saved')
+            return
+          }
+          dirty.current = true
+          setSync('error')
+          return
+        }
+      }
+      setSync('saved')
+    } finally {
+      saving.current = false
+    }
+  }
 
-  const value = useMemo(() => ({ state, dispatch, dark }), [state, dark])
+  // Warn before closing the tab with unsaved changes.
+  useEffect(() => {
+    if (mode !== 'user') return
+    const on = (e) => { if (dirty.current || saving.current) { e.preventDefault(); e.returnValue = '' } }
+    window.addEventListener('beforeunload', on)
+    return () => window.removeEventListener('beforeunload', on)
+  }, [mode])
+
+  const value = useMemo(
+    () => ({ state, dispatch, mode, sync, retry: flush, notice, clearNotice: () => setNotice(null) }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state, mode, sync, notice],
+  )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 

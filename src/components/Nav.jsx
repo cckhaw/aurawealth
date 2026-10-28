@@ -1,5 +1,10 @@
-import { LayoutDashboard, Landmark, ArrowLeftRight, LineChart, Settings, Sparkles, Sun, Moon } from 'lucide-react'
+import { LayoutDashboard, Landmark, ArrowLeftRight, LineChart, Settings, Sun, Moon, Check, CloudOff, Loader2, LogOut } from 'lucide-react'
 import { cx } from './ui'
+import { LogoMark } from './Brand'
+import { useStore } from '../lib/store'
+import { useAuth } from '../lib/auth'
+import { useTheme } from '../lib/theme'
+import { Link } from '../lib/router'
 
 export const TABS = [
   { id: 'dashboard', label: 'Dashboard', short: 'Home', icon: LayoutDashboard },
@@ -11,19 +16,64 @@ export const TABS = [
 
 export function Logo() {
   return (
-    <div className="flex items-center gap-3">
-      <div className="w-10 h-10 rounded-[12px] flex items-center justify-center text-white shadow-[0_6px_16px_rgba(88,86,214,0.35)]" style={{ background: 'linear-gradient(135deg,#007AFF,#5856D6)' }}>
-        <Sparkles size={20} />
-      </div>
+    <Link to="/" className="flex items-center gap-3" aria-label="Aura Wealth home">
+      <LogoMark />
       <div className="leading-tight">
         <p className="text-[17px] font-bold tracking-tight t-label">Aura Wealth</p>
         <p className="text-[12px] t-label-2">Net worth, in focus</p>
+      </div>
+    </Link>
+  )
+}
+
+export function SyncBadge() {
+  const { mode, sync, retry } = useStore()
+  if (mode === 'demo') return <span className="text-[12px] t-label-2">Demo · saved on this device</span>
+  if (sync === 'error')
+    return (
+      <button onClick={retry} className="inline-flex items-center gap-1.5 text-[12px] font-medium text-apple-red">
+        <CloudOff size={13} /> Not saved · Retry
+      </button>
+    )
+  return sync === 'saving' ? (
+    <span className="inline-flex items-center gap-1.5 text-[12px] t-label-2"><Loader2 size={13} className="animate-spin" /> Saving…</span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 text-[12px] t-label-2"><Check size={13} className="text-apple-green" /> Saved</span>
+  )
+}
+
+function UserCard() {
+  const { mode } = useStore()
+  const { user, logout } = useAuth()
+  if (mode === 'demo')
+    return (
+      <div className="rounded-[16px] bg-fill p-3.5 mb-3">
+        <p className="text-[13px] font-semibold t-label">You’re in demo mode</p>
+        <p className="text-[12px] t-label-2 mt-0.5 mb-3">Sample data stays in this browser. Create an account to save yours.</p>
+        <Link to="/signup" className="flex items-center justify-center min-h-[44px] rounded-[12px] bg-apple-blue text-white text-[14px] font-semibold">Create free account</Link>
+      </div>
+    )
+  return (
+    <div className="rounded-[16px] bg-fill p-3 mb-3">
+      <div className="flex items-center gap-3">
+        <span className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-white font-semibold" style={{ background: 'linear-gradient(135deg,#007AFF,#5856D6)' }}>
+          {(user?.name || '?')[0].toUpperCase()}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-semibold t-label truncate">{user?.name}</p>
+          <p className="text-[12px] t-label-2 truncate">{user?.email}</p>
+        </div>
+      </div>
+      <div className="flex items-center justify-between mt-2.5">
+        <SyncBadge />
+        <button onClick={logout} aria-label="Sign out" className="inline-flex items-center gap-1 min-h-[36px] px-2 whitespace-nowrap text-[13px] font-medium t-label-2 hover:text-apple-red"><LogOut size={14} /> Sign out</button>
       </div>
     </div>
   )
 }
 
-export function Sidebar({ tab, onTab, dark, onToggleDark }) {
+export function Sidebar({ tab, onTab }) {
+  const { dark, toggle: onToggleDark } = useTheme()
   return (
     <aside className="hidden lg:flex fixed inset-y-0 left-0 w-[280px] p-4 z-30">
       <div className="glass w-full flex flex-col p-4">
@@ -47,9 +97,11 @@ export function Sidebar({ tab, onTab, dark, onToggleDark }) {
             )
           })}
         </nav>
+        <div className="mt-auto" />
+        <UserCard />
         <button
           onClick={onToggleDark}
-          className="mt-auto flex items-center justify-between min-h-[48px] px-3.5 rounded-[14px] bg-fill t-label text-[15px] font-medium transition-all duration-300 ease-apple active:scale-[0.98]"
+          className="flex items-center justify-between min-h-[48px] px-3.5 rounded-[14px] bg-fill t-label text-[15px] font-medium transition-all duration-300 ease-apple active:scale-[0.98]"
           aria-label="Toggle dark mode"
         >
           <span className="flex items-center gap-3">{dark ? <Moon size={19} /> : <Sun size={19} />}{dark ? 'Dark' : 'Light'} mode</span>
@@ -62,13 +114,20 @@ export function Sidebar({ tab, onTab, dark, onToggleDark }) {
   )
 }
 
-export function MobileHeader({ dark, onToggleDark }) {
+export function MobileHeader() {
+  const { dark, toggle: onToggleDark } = useTheme()
+  const { mode } = useStore()
   return (
     <header className="lg:hidden sticky top-0 z-30 flex items-center justify-between px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 bg-[var(--bg)]/80 backdrop-blur-xl border-b hairline">
       <Logo />
+      <div className="flex items-center gap-2">
+        {mode === 'demo' ? (
+          <Link to="/signup" className="inline-flex items-center min-h-[44px] px-4 rounded-full bg-apple-blue text-white text-[13px] font-semibold">Sign up</Link>
+        ) : <SyncBadge />}
       <button onClick={onToggleDark} aria-label="Toggle dark mode" className="w-11 h-11 rounded-full bg-fill flex items-center justify-center t-label active:scale-90 transition-all duration-300 ease-apple">
         {dark ? <Moon size={19} /> : <Sun size={19} />}
       </button>
+      </div>
     </header>
   )
 }

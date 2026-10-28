@@ -1,48 +1,54 @@
-import { useCallback, useState } from 'react'
-import { BottomBar, MobileHeader, Sidebar } from './components/Nav'
-import TransactionModal from './components/TransactionModal'
-import HoldingModal from './components/HoldingModal'
-import Dashboard from './views/Dashboard'
-import NetWorth from './views/NetWorth'
-import CashFlow from './views/CashFlow'
-import Projections from './views/Projections'
-import Settings from './views/Settings'
-import { useStore } from './lib/store'
+import { useEffect } from 'react'
+import { useAuth } from './lib/auth'
+import { navigate, usePath } from './lib/router'
+import { StoreProvider, loadDemo, normalize } from './lib/store'
+import { blankState } from './lib/seed'
+import Landing from './views/Landing'
+import AuthPage from './views/AuthPage'
+import AppShell from './views/AppShell'
+import { LogoMark } from './components/Brand'
 
-export default function App() {
-  const { dispatch, dark } = useStore()
-  const [tab, setTab] = useState('dashboard')
-  const [txModal, setTxModal] = useState({ open: false, tx: null })
-  const [hModal, setHModal] = useState({ open: false, holding: null, kind: 'asset' })
-
-  const toggleDark = () => dispatch({ type: 'settings/patch', patch: { theme: dark ? 'light' : 'dark' } })
-
-  const goTab = useCallback((t) => {
-    setTab(t)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }, [])
-  const openTx = useCallback((tx = null) => setTxModal({ open: true, tx }), [])
-  const closeTx = useCallback(() => setTxModal((m) => ({ ...m, open: false })), [])
-  const openHolding = useCallback((holding) => setHModal({ open: true, holding, kind: holding.kind }), [])
-  const addHolding = useCallback((kind) => setHModal({ open: true, holding: null, kind }), [])
-  const closeHolding = useCallback(() => setHModal((m) => ({ ...m, open: false })), [])
-
+function Splash() {
   return (
-    <div className="min-h-dvh">
-      <Sidebar tab={tab} onTab={goTab} dark={dark} onToggleDark={toggleDark} />
-      <MobileHeader dark={dark} onToggleDark={toggleDark} />
-      <main className="lg:pl-[304px] px-4 sm:px-6 lg:px-8 pt-5 lg:pt-8 pb-28 lg:pb-10">
-        <div className="mx-auto max-w-[1200px]">
-          {tab === 'dashboard' && <Dashboard onTab={goTab} onAddTx={openTx} />}
-          {tab === 'networth' && <NetWorth onEdit={openHolding} onAdd={addHolding} />}
-          {tab === 'cashflow' && <CashFlow onEdit={openTx} onAdd={openTx} />}
-          {tab === 'projections' && <Projections />}
-          {tab === 'settings' && <Settings />}
-        </div>
-      </main>
-      <BottomBar tab={tab} onTab={goTab} />
-      <TransactionModal open={txModal.open} tx={txModal.tx} onClose={closeTx} />
-      <HoldingModal open={hModal.open} holding={hModal.holding} defaultKind={hModal.kind} onClose={closeHolding} />
+    <div className="min-h-dvh flex items-center justify-center" aria-busy="true" aria-label="Loading">
+      <div className="animate-pulse"><LogoMark size={56} /></div>
     </div>
   )
+}
+
+export default function App() {
+  const path = usePath()
+  const { status, user, boot, dropSession } = useAuth()
+
+  const protectedRoute = path === '/app'
+  const guestRoute = path === '/login' || path === '/signup'
+
+  useEffect(() => {
+    if (status === 'anon' && protectedRoute) navigate('/login', { replace: true })
+    if (status === 'authed' && guestRoute) navigate('/app', { replace: true })
+  }, [status, protectedRoute, guestRoute])
+
+  useEffect(() => {
+    const titles = { '/': 'Aura Wealth — Your whole financial life, in focus', '/login': 'Sign in · Aura Wealth', '/signup': 'Create account · Aura Wealth', '/app': 'Aura Wealth', '/demo': 'Demo · Aura Wealth' }
+    document.title = titles[path] || 'Aura Wealth'
+  }, [path])
+
+  if (path === '/demo')
+    return <StoreProvider key="demo" mode="demo" initial={loadDemo()}><AppShell /></StoreProvider>
+
+  if (status === 'loading') return <Splash />
+
+  if (path === '/app') {
+    if (status !== 'authed') return <Splash />
+    // Keyed by user id: switching accounts always starts from a fresh store, never the previous user's state.
+    return (
+      <StoreProvider key={user.id} mode="user" initial={normalize(boot.data, blankState())} rev={boot.rev} onSignedOut={dropSession}>
+        <AppShell />
+      </StoreProvider>
+    )
+  }
+
+  if (guestRoute) return status === 'authed' ? <Splash /> : <AuthPage key={path} mode={path === '/signup' ? 'signup' : 'login'} />
+
+  return <Landing />
 }

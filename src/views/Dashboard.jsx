@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Area, AreaChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Banknote, PiggyBank, Shield, Wallet, ArrowRight, Receipt } from 'lucide-react'
+import { Banknote, PiggyBank, Shield, Wallet, ArrowRight, Receipt, Sparkles, Plus } from 'lucide-react'
 import { Badge, Button, Card, ChartTooltip, EmptyState, SectionTitle } from '../components/ui'
 import Kpi from '../components/Kpi'
 import { useStore } from '../lib/store'
@@ -9,8 +9,8 @@ import { ASSET_CLASSES, CATEGORY_COLORS, TX_TYPES } from '../lib/constants'
 import { cashMetrics, netWorthTrend, totals } from '../lib/calc'
 import { addDays, fmtDate, iso, pct } from '../lib/format'
 
-export default function Dashboard({ onTab, onAddTx }) {
-  const { state } = useStore()
+export default function Dashboard({ onTab, onAddTx, onAddHolding }) {
+  const { state, dispatch } = useStore()
   const f = useFmt()
   const { holdings, transactions, settings } = state
 
@@ -40,6 +40,18 @@ export default function Dashboard({ onTab, onAddTx }) {
         <h1 className="text-[32px] sm:text-[36px] font-bold tracking-tight t-label">Overview</h1>
         <p className="t-label-2 text-[15px]">Your financial position at a glance · trailing 30 days</p>
       </div>
+
+      {holdings.length === 0 && transactions.length === 0 && (
+        <Card className="p-6 sm:p-8 text-center">
+          <div className="mx-auto w-14 h-14 rounded-full flex items-center justify-center text-white mb-4" style={{ background: 'linear-gradient(135deg,#007AFF,#5856D6)' }}><Sparkles size={26} /></div>
+          <h2 className="text-[22px] font-bold tracking-tight t-label">Welcome to Aura Wealth</h2>
+          <p className="t-label-2 mt-1 max-w-md mx-auto">Your dashboard is empty. Add your first asset to see your net worth, or load sample data to explore with a realistic portfolio.</p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center mt-5">
+            <Button icon={Plus} onClick={() => onAddHolding('asset')}>Add your first asset</Button>
+            <Button variant="secondary" icon={Sparkles} onClick={() => dispatch({ type: 'sample' })}>Load sample data</Button>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         <Kpi
